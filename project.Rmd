@@ -1,0 +1,96 @@
+---
+title: "Predicting Exercise Class"
+author: "Michael Bruce"
+date: "January 31, 2016"
+output: html_document
+---
+
+## Introduction
+The purpose of this project is to build a classification algorithm to predict the class of exercise performed by a user wearing multiple on-body sensors.  The class corresponds to whether an exercise was performed correctly.  In this paper the construction of the model, cross-validation estimate of out-of-sample error, and test set prediction will be discussed.  Data was provided by Qualitative Activity Recognition of Weight Lifting Exercises whitepaper (link available in references).
+
+## Data Importation and Cleaning
+We first load the required libraries:
+```{r warning=FALSE, message=FALSE}
+library(caret)
+library(parallel)
+library(doParallel)
+```
+
+In order to improve speed of model creation, we setup a parallel processing cluster (for more information, please see link in references):
+```{r warning=FALSE, message=FALSE}
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+```
+
+Next, we load the training and test data sets provided in the white paper:
+```{r warning=FALSE, message=FALSE}
+training = read.csv("pml-training.csv", sep=",", strip.white = TRUE, na.strings = c("#DIV/0!", "NA"))
+testing = read.csv("pml-testing.csv", sep=",", strip.white = TRUE, na.strings = c("#DIV/0!", "NA"))
+```
+
+We then set the seed for reproducibility:
+```{r warning=FALSE, message=FALSE}
+set.seed(33833)
+```
+
+To make the data set usable for model building, we remove columns from the data set which contain NA values:
+```{r warning=FALSE, message=FALSE}
+training_filt <- Filter(function(x)!any(is.na(x)), training)
+testing_filt <- testing[names(training_filt)[1:length(training_filt)-1]]
+```
+
+## Feature Selection
+We then take a look at the training data, and remove the first seven columns, which do not contain sensor data:
+```{r warning=FALSE, message=FALSE}
+head(training_filt[1:7])
+train_sense <- training_filt[8:length(training_filt)]
+test_sense <- testing_filt[8:length(testing_filt)]
+```
+
+The final step in feature selection, is to drop sensors with near zero variability.  This removes features with little potential explanatory power:
+```{r warning=FALSE, message=FALSE}
+zero_var <- nearZeroVar(train_sense,saveMetrics=TRUE)
+var_filt <- zero_var$percentUnique > 0.5
+var_filt <- var_filt[1:length(var_filt)-1]
+train_trim <- train_sense[var_filt]
+test_trim <- test_sense[var_filt]
+```
+
+We are left with 47 features to train on.
+
+## Model Construction with Cross-Validation
+Before contstructing the model, we need to define the desired control parameters to pass to caret.  We our defining our method of cross-validation to be k-fold, using 5 folds (this number was chosen as a compromise to lower construction time, as the large training set could support more folds):
+```{r warning=FALSE, message=FALSE}
+fitControl <- trainControl(method = "cv", number = 5, allowParallel = TRUE)
+```
+
+We then create our model, passing the specified control parameters to caret's train function.  Random forest method is used, as this is an accurate and common method for classification prediction.  This is the default method for the train function:
+```{r warning=FALSE, message=FALSE}
+modFit <- train(classe ~ ., method="rf", data=train_trim, trControl=fitControl)
+```
+
+## Out of Sample Error Estimation
+The train object returns the cross-validated accuracy estimate:
+```{r warning=FALSE, message=FALSE}
+print(modFit$results[1,2])
+```
+
+The cross-validation test results in an estimated out of sample error rate of less than 1%!
+
+## Test Set Prediction
+
+Finally, we predict activity class on our test data set:
+```{r warning=FALSE, message=FALSE}
+test_res <- predict(modFit, newdata = test_trim)
+print(test_res)
+```
+
+And de-register parallel processing cluster:
+```{r warning=FALSE, message=FALSE}
+stopCluster(cluster)
+```
+
+## References
+http://groupware.les.inf.puc-rio.br/har
+
+https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md
